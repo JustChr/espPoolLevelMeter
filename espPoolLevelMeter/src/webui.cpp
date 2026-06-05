@@ -143,7 +143,7 @@ code{background:var(--s2);padding:1px 6px;border-radius:4px;font-size:.85em}
     <input id="w-pass" type="password" placeholder="WiFi password" autocomplete="off">
     <div class="btns" style="margin-top:12px">
       <button class="btn btn-p" onclick="saveWifi()">&#x1F4BE; Save &amp; Reboot</button>
-      <button class="btn btn-s" onclick="scanWifi()">&#x1F50D; Scan</button>
+      <button class="btn btn-s" id="scan-btn" onclick="scanWifi()">&#x1F50D; Scan</button>
     </div>
     <div id="net-list" style="margin-top:10px"></div>
     <div class="msg" id="wifi-msg"></div>
@@ -381,16 +381,37 @@ async function saveWifi(){
   showMsg('wifi-msg',r.ok,r.ok?'✅ Saved — rebooting…':'❌ '+r.error);
 }
 
-async function scanWifi(){
-  document.getElementById('net-list').innerHTML=
-    '<div style="font-size:.8rem;color:var(--muted);padding:5px">Scanning…</div>';
-  const r=await api('/api/scan');
-  const nets=r.networks||[];
-  document.getElementById('net-list').innerHTML=nets.length
-    ?nets.map(n=>'<div class="net-item" onclick="document.getElementById(\'w-ssid\').value=\''+
-        n.ssid.replace(/'/g,"\\'")+'\'">'+'<span>📶 '+n.ssid+'</span>'+
-        '<span style="color:var(--muted);font-size:.75rem">'+n.rssi+' dBm '+(n.enc?'🔒':'')+'</span></div>').join('')
-    :'<div style="font-size:.8rem;color:var(--muted)">No networks found.</div>';
+async function scanWifi() {
+  const btn = document.getElementById('scan-btn');
+  btn.disabled = true;
+  document.getElementById('net-list').innerHTML =
+    '<div style="font-size:.8rem;color:var(--muted);padding:5px">Scanning...</div>';
+
+  // Kick off async scan — returns immediately with scanning:true
+  await api('/api/scan');
+
+  // Poll up to 8 s for results
+  for (let i = 0; i < 8; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    const r = await api('/api/scan');
+    if (!r.scanning) {
+      const nets = r.networks || [];
+      document.getElementById('net-list').innerHTML = nets.length
+        ? nets.map(n =>
+            '<div class="net-item" onclick="document.getElementById(\'w-ssid\').value=\'' +
+            n.ssid.replace(/'/g, "\\'") + '\'">' +
+            '<span>&#x1F4F6; ' + n.ssid + '</span>' +
+            '<span style="color:var(--muted);font-size:.75rem">' +
+            n.rssi + ' dBm ' + (n.enc ? '&#x1F512;' : '') + '</span></div>'
+          ).join('')
+        : '<div style="font-size:.8rem;color:var(--muted)">No networks found.</div>';
+      btn.disabled = false;
+      return;
+    }
+  }
+  document.getElementById('net-list').innerHTML =
+    '<div style="font-size:.8rem;color:var(--err)">Scan timed out.</div>';
+  btn.disabled = false;
 }
 
 async function saveMqtt(){

@@ -6,8 +6,7 @@ bool loadConfig(AppConfig &cfg) {
     if (!LittleFS.exists(CONFIG_FILE)) return false;
     File f = LittleFS.open(CONFIG_FILE, "r");
     if (!f) return false;
-
-    DynamicJsonDocument doc(2048);
+    JsonDocument doc;
     if (deserializeJson(doc, f)) { f.close(); return false; }
     f.close();
 
@@ -21,19 +20,21 @@ bool loadConfig(AppConfig &cfg) {
     cfg.deviceName    = doc["device_name"]  | "PoolLevel";
     cfg.clientId      = doc["client_id"]    | "poollevel";
     cfg.haDiscovery   = doc["ha_discovery"] | true;
+    cfg.numSwitches   = doc["num_switches"] | 2;
+    // clamp to valid range
+    if (cfg.numSwitches < MIN_SWITCHES) cfg.numSwitches = MIN_SWITCHES;
+    if (cfg.numSwitches > MAX_SWITCHES) cfg.numSwitches = MAX_SWITCHES;
 
     for (int i = 0; i < MAX_SWITCHES; i++) {
         String k = "sw" + String(i);
-        cfg.sw[i].gpio      = doc[k + "_gpio"]    | DEFAULT_GPIO[i];
-        cfg.sw[i].name      = doc[k + "_name"]    | ("Switch_" + String(i + 1));
-        cfg.sw[i].activeLow = doc[k + "_actlow"]  | true;
-        cfg.sw[i].enabled   = doc[k + "_enabled"] | (i == 0);
+        cfg.sw[i].gpio      = doc[k + "_gpio"]   | DEFAULT_GPIO[i];
+        cfg.sw[i].activeLow = doc[k + "_actlow"] | true;
     }
     return true;
 }
 
 bool saveConfig(const AppConfig &cfg) {
-    DynamicJsonDocument doc(2048);
+    JsonDocument doc;
     doc["wifi_ssid"]    = cfg.wifiSSID;
     doc["wifi_pass"]    = cfg.wifiPassword;
     doc["mqtt_host"]    = cfg.mqttHost;
@@ -44,13 +45,12 @@ bool saveConfig(const AppConfig &cfg) {
     doc["device_name"]  = cfg.deviceName;
     doc["client_id"]    = cfg.clientId;
     doc["ha_discovery"] = cfg.haDiscovery;
+    doc["num_switches"] = cfg.numSwitches;
 
     for (int i = 0; i < MAX_SWITCHES; i++) {
         String k = "sw" + String(i);
-        doc[k + "_gpio"]    = cfg.sw[i].gpio;
-        doc[k + "_name"]    = cfg.sw[i].name;
-        doc[k + "_actlow"]  = cfg.sw[i].activeLow;
-        doc[k + "_enabled"] = cfg.sw[i].enabled;
+        doc[k + "_gpio"]   = cfg.sw[i].gpio;
+        doc[k + "_actlow"] = cfg.sw[i].activeLow;
     }
 
     File f = LittleFS.open(CONFIG_FILE, "w");

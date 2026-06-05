@@ -6,6 +6,7 @@ bool loadConfig(AppConfig &cfg) {
     if (!LittleFS.exists(CONFIG_FILE)) return false;
     File f = LittleFS.open(CONFIG_FILE, "r");
     if (!f) return false;
+
     DynamicJsonDocument doc(2048);
     if (deserializeJson(doc, f)) { f.close(); return false; }
     f.close();
@@ -23,10 +24,10 @@ bool loadConfig(AppConfig &cfg) {
 
     for (int i = 0; i < MAX_SWITCHES; i++) {
         String k = "sw" + String(i);
-        cfg.sw[i].gpio      = doc[k+"_gpio"]    | DEFAULT_GPIO[i];
-        cfg.sw[i].name      = doc[k+"_name"]    | ("Switch_"+String(i+1));
-        cfg.sw[i].activeLow = doc[k+"_actlow"]  | true;
-        cfg.sw[i].enabled   = doc[k+"_enabled"] | (i==0);
+        cfg.sw[i].gpio      = doc[k + "_gpio"]    | DEFAULT_GPIO[i];
+        cfg.sw[i].name      = doc[k + "_name"]    | ("Switch_" + String(i + 1));
+        cfg.sw[i].activeLow = doc[k + "_actlow"]  | true;
+        cfg.sw[i].enabled   = doc[k + "_enabled"] | (i == 0);
     }
     return true;
 }
@@ -43,13 +44,15 @@ bool saveConfig(const AppConfig &cfg) {
     doc["device_name"]  = cfg.deviceName;
     doc["client_id"]    = cfg.clientId;
     doc["ha_discovery"] = cfg.haDiscovery;
+
     for (int i = 0; i < MAX_SWITCHES; i++) {
         String k = "sw" + String(i);
-        doc[k+"_gpio"]    = cfg.sw[i].gpio;
-        doc[k+"_name"]    = cfg.sw[i].name;
-        doc[k+"_actlow"]  = cfg.sw[i].activeLow;
-        doc[k+"_enabled"] = cfg.sw[i].enabled;
+        doc[k + "_gpio"]    = cfg.sw[i].gpio;
+        doc[k + "_name"]    = cfg.sw[i].name;
+        doc[k + "_actlow"]  = cfg.sw[i].activeLow;
+        doc[k + "_enabled"] = cfg.sw[i].enabled;
     }
+
     File f = LittleFS.open(CONFIG_FILE, "w");
     if (!f) return false;
     serializeJson(doc, f);

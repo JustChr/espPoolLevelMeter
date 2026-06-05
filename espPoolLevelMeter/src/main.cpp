@@ -4,7 +4,7 @@
 #include <DNSServer.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
-#include <FS.h>
+#include <LittleFS.h>
 #include <Ticker.h>
 #include "config.h"
 
@@ -166,7 +166,7 @@ void apiSaveWifi() {
     if (deserializeJson(doc, server.arg("plain"))) { sendFail("parse error"); return; }
     cfg.wifiSSID     = doc["wifi_ssid"] | "";
     cfg.wifiPassword = doc["wifi_pass"] | "";
-    if (!saveConfig(cfg)) { sendFail("SPIFFS write failed"); return; }
+    if (!saveConfig(cfg)) { sendFail("LittleFS write failed"); return; }
     sendOk(); delay(400); ESP.restart();
 }
 
@@ -181,7 +181,7 @@ void apiSaveMqtt() {
     cfg.mqttUser      = doc["mqtt_user"]   | "";
     cfg.mqttPassword  = doc["mqtt_pass"]   | "";
     cfg.haDiscovery   = doc["ha_discovery"]| true;
-    saveConfig(cfg) ? sendOk() : sendFail("SPIFFS write failed");
+    saveConfig(cfg) ? sendOk() : sendFail("LittleFS write failed");
 }
 
 void apiSaveSwitches() {
@@ -194,7 +194,7 @@ void apiSaveSwitches() {
         cfg.sw[i].activeLow = sw["actlow"] | true;
         cfg.sw[i].enabled   = sw["enabled"]| false;
     }
-    if (!saveConfig(cfg)) { sendFail("SPIFFS write failed"); return; }
+    if (!saveConfig(cfg)) { sendFail("LittleFS write failed"); return; }
     sendOk(); delay(400); ESP.restart();
 }
 
@@ -212,7 +212,7 @@ void apiScan() {
 }
 
 void apiReset() {
-    SPIFFS.remove(CONFIG_FILE); sendOk(); delay(400); ESP.restart();
+    LittleFS.remove(CONFIG_FILE); sendOk(); delay(400); ESP.restart();
 }
 
 void handleNotFound() {
@@ -223,7 +223,11 @@ void setup() {
     Serial.begin(115200);
     Serial.printf("\n\n=== PoolLevel v%s ===\n", FW_VERSION);
     pinMode(STATUS_LED_PIN, OUTPUT); ledOff();
-    SPIFFS.begin();
+    if (!LittleFS.begin()) {
+        Serial.println(F("LittleFS mount failed – formatting…"));
+        LittleFS.format();
+        LittleFS.begin();
+    }
     bool cfgOk = loadConfig(cfg);
     for (int i = 0; i < MAX_SWITCHES; i++) {
         if (cfg.sw[i].name.isEmpty()) cfg.sw[i].name = "Switch_"+String(i+1);

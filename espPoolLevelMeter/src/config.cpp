@@ -1,10 +1,10 @@
 #include "config.h"
 #include <ArduinoJson.h>
-#include <FS.h>
+#include <LittleFS.h>
 
 bool loadConfig(AppConfig &cfg) {
-    if (!SPIFFS.exists(CONFIG_FILE)) return false;
-    File f = SPIFFS.open(CONFIG_FILE, "r");
+    if (!LittleFS.exists(CONFIG_FILE)) return false;
+    File f = LittleFS.open(CONFIG_FILE, "r");
     if (!f) return false;
     DynamicJsonDocument doc(2048);
     if (deserializeJson(doc, f)) { f.close(); return false; }
@@ -50,7 +50,7 @@ bool saveConfig(const AppConfig &cfg) {
         doc[k+"_actlow"]  = cfg.sw[i].activeLow;
         doc[k+"_enabled"] = cfg.sw[i].enabled;
     }
-    File f = SPIFFS.open(CONFIG_FILE, "w");
+    File f = LittleFS.open(CONFIG_FILE, "w");
     if (!f) return false;
     serializeJson(doc, f);
     f.close();

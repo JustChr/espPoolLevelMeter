@@ -160,14 +160,19 @@ void publishTelemetryDiscovery() {
         const char *name;       // friendly name
         const char *unit;       // unit_of_measurement (nullptr = none)
         const char *devClass;   // device_class (nullptr = none)
+        const char *stateClass; // state_class, e.g. "measurement" (nullptr = none)
         const char *icon;       // icon (nullptr = none)
     };
     static const TelemetrySensor SENSORS[] = {
-        { "rssi",       "WiFi Signal",        "dBm", "signal_strength", nullptr },
-        { "free_heap",  "Free Heap",          "B",   nullptr,          "mdi:memory" },
-        { "heap_frag",  "Heap Fragmentation", "%",   nullptr,          "mdi:memory" },
-        { "max_block",  "Largest Heap Block", "B",   nullptr,          "mdi:memory" },
-        { "uptime",     "Uptime",             "s",   "duration",       nullptr },
+        { "rssi",       "WiFi Signal",        "dBm", "signal_strength", "measurement", nullptr },
+        { "ssid",       "WiFi SSID",          nullptr, nullptr,         nullptr,       "mdi:wifi" },
+        { "bssid",      "WiFi BSSID",         nullptr, nullptr,         nullptr,       "mdi:access-point" },
+        { "channel",    "WiFi Channel",       nullptr, nullptr,         nullptr,       "mdi:wifi-settings" },
+        { "ip",         "IP Address",         nullptr, nullptr,         nullptr,       "mdi:ip-network" },
+        { "free_heap",  "Free Heap",          "B",   nullptr,          "measurement", "mdi:memory" },
+        { "heap_frag",  "Heap Fragmentation", "%",   nullptr,          "measurement", "mdi:memory" },
+        { "max_block",  "Largest Heap Block", "B",   nullptr,          "measurement", "mdi:memory" },
+        { "uptime",     "Uptime",             "s",   "duration",       nullptr,       nullptr },
     };
 
     for (const auto &s : SENSORS) {
@@ -182,10 +187,10 @@ void publishTelemetryDiscovery() {
         doc["payload_available"]     = "online";
         doc["payload_not_available"] = "offline";
         doc["entity_category"]       = "diagnostic";
-        if (s.unit)     doc["unit_of_measurement"] = s.unit;
-        if (s.devClass) doc["device_class"]        = s.devClass;
-        if (s.devClass && String(s.devClass) != "duration") doc["state_class"] = "measurement";
-        if (s.icon)     doc["icon"]                = s.icon;
+        if (s.unit)       doc["unit_of_measurement"] = s.unit;
+        if (s.devClass)   doc["device_class"]        = s.devClass;
+        if (s.stateClass) doc["state_class"]         = s.stateClass;
+        if (s.icon)       doc["icon"]                = s.icon;
 
         addDeviceBlock(doc);
 
@@ -199,6 +204,10 @@ void publishTelemetry() {
     if (!mqtt.connected()) return;
     JsonDocument doc;
     doc["rssi"]      = WiFi.RSSI();
+    doc["ssid"]      = WiFi.SSID();
+    doc["bssid"]     = WiFi.BSSIDstr();      // which mesh AP we're roamed onto
+    doc["channel"]   = WiFi.channel();
+    doc["ip"]        = WiFi.localIP().toString();
     doc["free_heap"] = ESP.getFreeHeap();
     doc["heap_frag"] = ESP.getHeapFragmentation();
     doc["max_block"] = ESP.getMaxFreeBlockSize();
@@ -994,6 +1003,7 @@ void setup() {
 
     mqtt.setKeepAlive(60);
     mqtt.setSocketTimeout(10);
+    mqtt.setBufferSize(1024);   // discovery configs (esp. RSSI) exceed the 256/512 default
 
     if (!connectWiFi()) {
         Serial.println(F("WiFi failed -> AP mode"));

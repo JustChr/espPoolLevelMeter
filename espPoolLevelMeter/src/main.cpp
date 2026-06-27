@@ -1,7 +1,14 @@
 /*
-  PoolLevel v2.1.0
+  PoolLevel v2.2.0
   ─────────────────────────────────────────────────────────────────────────────
-  Changes vs 2.0.0
+  Changes vs 2.1.0
+  ─────────────────
+  • WiFi reliability for always-on/mesh use:
+      - modem sleep disabled (WIFI_NONE_SLEEP) so the AP never ages out a dozing client
+      - explicit auto-reconnect + stable hostname (cfg.clientId)
+      - loop watchdog: re-kicks WiFi.begin() when offline, reboots after 10 min down
+
+  Changes 2.1.0 vs 2.0.0
   ─────────────────
   • 2–4 switches report ONE level state instead of N binary sensors
   • Level = count of active switches mapped to a zone label:
@@ -211,6 +218,9 @@ bool connectWiFi() {
     if (cfg.wifiSSID.isEmpty()) return false;
     WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
+    WiFi.setSleepMode(WIFI_NONE_SLEEP);   // always-on: avoids Fritz! dropping a dozing client
+    WiFi.setAutoReconnect(true);
+    WiFi.hostname(cfg.clientId.c_str());   // stable name in the Fritz! device list
     WiFi.begin(cfg.wifiSSID.c_str(), cfg.wifiPassword.c_str());
     ledTicker.attach(0.2f, ledToggle);
     uint32_t t0 = millis();
@@ -230,6 +240,34 @@ void startAP() {
     dns.start(DNS_PORT, "*", WiFi.softAPIP());
     ledTicker.attach(1.0f, ledToggle);
     Serial.printf("AP  SSID:%s  IP:%s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
+}
+
+// Keeps the station link alive forever: kicks a fresh reconnect when the SDK's
+// auto-reconnect wedges (common after Fritz! mesh band-steering), and reboots
+// as a last resort if the link stays down past WIFI_REBOOT_MS.
+void wifiWatchdog() {
+    static uint32_t lastReconnect = 0;
+    static uint32_t downSince     = 0;
+
+    if (WiFi.status() == WL_CONNECTED) {
+        downSince = 0;
+        return;
+    }
+
+    uint32_t now = millis();
+    if (downSince == 0) downSince = now;
+
+    if (now - lastReconnect > WIFI_RECONNECT_MS) {
+        lastReconnect = now;
+        Serial.println(F("WiFi down -> reconnect"));
+        WiFi.disconnect();
+        WiFi.begin(cfg.wifiSSID.c_str(), cfg.wifiPassword.c_str());
+    }
+
+    if (now - downSince > WIFI_REBOOT_MS) {
+        Serial.println(F("WiFi down too long -> restart"));
+        ESP.restart();
+    }
 }
 
 // ─── Web UI HTML ──────────────────────────────────────────────────────────────
@@ -695,7 +733,8 @@ function doOta(){
     document.getElementById('ota-bar').style.width=p+'%';
     document.getElementById('ota-pct').textContent=p+'%';}};
   xhr.onload=()=>{const ok=xhr.status===200;
-    showMsg('ota-msg',ok,ok?'Update OK - rebooting...':'Failed: '+xhr.responseText);};
+    showMsg('ota-msg',ok,ok?'Update OK - rebooting...':'Failed: '+xhr.responseText);
+    if(!ok)document.getElementById('ota-btn').disabled=false;};
   xhr.onerror=()=>{showMsg('ota-msg',false,'Network error.');
     document.getElementById('ota-btn').disabled=false;};
   xhr.send(fd);
@@ -716,7 +755,9 @@ void setupHttpOTA() {
     server.on("/update", HTTP_POST,
         [](AsyncWebServerRequest *req) {
             bool ok = !Update.hasError();
-            AsyncWebServerResponse *r = req->beginResponse(200, "text/plain", ok?"OK":"FAIL");
+            String msg = ok ? "OK" : ("Update failed: " + Update.getErrorString());
+            AsyncWebServerResponse *r =
+                req->beginResponse(ok ? 200 : 500, "text/plain", msg);
             r->addHeader("Connection","close");
             req->send(r);
             if (ok) { delay(200); ESP.restart(); }
@@ -724,15 +765,26 @@ void setupHttpOTA() {
         [](AsyncWebServerRequest *req, String filename, size_t index,
            uint8_t *data, size_t len, bool final) {
             if (!index) {
+                Serial.printf("OTA start: %s\n", filename.c_str());
                 if (mqtt.connected()) {
                     mqtt.publish(availTopic().c_str(), "offline", true);
                     mqtt.disconnect();
                 }
                 Update.runAsync(true);
-                Update.begin((ESP.getFreeSketchSpace()-0x1000)&0xFFFFF000);
+                if (!Update.begin((ESP.getFreeSketchSpace()-0x1000)&0xFFFFF000)) {
+                    Serial.print(F("OTA begin failed: ")); Update.printError(Serial);
+                }
             }
-            if (!Update.hasError()) Update.write(data, len);
-            if (final && !Update.hasError()) Update.end(true);
+            if (!Update.hasError() && Update.write(data, len) != len) {
+                Serial.print(F("OTA write failed: ")); Update.printError(Serial);
+            }
+            if (final) {
+                if (!Update.hasError() && Update.end(true))
+                    Serial.printf("OTA success: %u bytes\n", index + len);
+                else {
+                    Serial.print(F("OTA end failed: ")); Update.printError(Serial);
+                }
+            }
         });
 }
 
@@ -896,7 +948,7 @@ void setup() {
 // ═══════════════════════════════════════════════════════════════════════════════
 void loop() {
     if (apMode) dns.processNextRequest();
-    if (!apMode) MDNS.update();
+    if (!apMode) { wifiWatchdog(); MDNS.update(); }
 
     if (restartPending && millis() > restartAt) ESP.restart();
 

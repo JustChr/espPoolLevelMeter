@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-#define FW_VERSION        "2.1.0"
+#define FW_VERSION        "2.2.0"
 #define CONFIG_FILE       "/config.json"
 #define MAX_SWITCHES      4
 #define MIN_SWITCHES      2
@@ -11,6 +11,8 @@
 #define HTTP_PORT         80
 #define STATUS_LED_PIN    2
 #define WIFI_TIMEOUT_MS   15000
+#define WIFI_RECONNECT_MS 30000     // kick a reconnect after this long offline
+#define WIFI_REBOOT_MS    600000    // last resort: reboot after 10 min offline
 #define MQTT_RECONNECT_MS 5000
 #define REPUBLISH_MS      60000
 

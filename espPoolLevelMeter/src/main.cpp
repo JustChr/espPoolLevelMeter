@@ -53,6 +53,7 @@ bool     restartPending  = false;
 uint32_t restartAt       = 0;
 uint32_t lastMqttAttempt = 0;
 uint32_t lastRepublish   = 0;
+uint32_t lastTelemetry   = 0;
 uint32_t lastSseUpdate   = 0;
 String   lastLevelState  = "";   // track last published state
 
@@ -101,8 +102,18 @@ String computeLevel() {
 }
 
 // ─── MQTT topics ──────────────────────────────────────────────────────────────
-String stateTopic() { return cfg.mqttBaseTopic + "/state"; }
-String availTopic() { return cfg.mqttBaseTopic + "/availability"; }
+String stateTopic()     { return cfg.mqttBaseTopic + "/state"; }
+String availTopic()     { return cfg.mqttBaseTopic + "/availability"; }
+String telemetryTopic() { return cfg.mqttBaseTopic + "/telemetry"; }
+
+// Shared HA "device" block so every entity groups under one device.
+void addDeviceBlock(JsonDocument &doc) {
+    JsonObject dev        = doc["device"].to<JsonObject>();
+    dev["identifiers"][0] = cfg.clientId;
+    dev["name"]           = cfg.deviceName;
+    dev["model"]          = "PoolLevel ESP8266";
+    dev["sw_version"]     = FW_VERSION;
+}
 
 // ─── HA discovery — single sensor entity ─────────────────────────────────────
 void publishDiscovery() {
@@ -132,15 +143,69 @@ void publishDiscovery() {
 
     doc["device_class"] = "enum";
 
-    JsonObject dev        = doc["device"].to<JsonObject>();
-    dev["identifiers"][0] = cfg.clientId;
-    dev["name"]           = cfg.deviceName;
-    dev["model"]          = "PoolLevel ESP8266";
-    dev["sw_version"]     = FW_VERSION;
+    addDeviceBlock(doc);
 
     String payload;
     serializeJson(doc, payload);
     mqtt.publish(topic.c_str(), payload.c_str(), true);
+}
+
+// ─── HA discovery — diagnostic telemetry sensors ─────────────────────────────
+// Each reads a field from the shared telemetry JSON topic via value_template.
+void publishTelemetryDiscovery() {
+    if (!cfg.haDiscovery) return;
+
+    struct TelemetrySensor {
+        const char *key;        // suffix for unique_id/object_id + value_json field
+        const char *name;       // friendly name
+        const char *unit;       // unit_of_measurement (nullptr = none)
+        const char *devClass;   // device_class (nullptr = none)
+        const char *icon;       // icon (nullptr = none)
+    };
+    static const TelemetrySensor SENSORS[] = {
+        { "rssi",       "WiFi Signal",        "dBm", "signal_strength", nullptr },
+        { "free_heap",  "Free Heap",          "B",   nullptr,          "mdi:memory" },
+        { "heap_frag",  "Heap Fragmentation", "%",   nullptr,          "mdi:memory" },
+        { "max_block",  "Largest Heap Block", "B",   nullptr,          "mdi:memory" },
+        { "uptime",     "Uptime",             "s",   "duration",       nullptr },
+    };
+
+    for (const auto &s : SENSORS) {
+        String topic = "homeassistant/sensor/" + cfg.clientId + "_" + s.key + "/config";
+
+        JsonDocument doc;
+        doc["name"]                  = String(cfg.deviceName) + " " + s.name;
+        doc["unique_id"]             = cfg.clientId + "_" + s.key;
+        doc["state_topic"]           = telemetryTopic();
+        doc["value_template"]        = String("{{ value_json.") + s.key + " }}";
+        doc["availability_topic"]    = availTopic();
+        doc["payload_available"]     = "online";
+        doc["payload_not_available"] = "offline";
+        doc["entity_category"]       = "diagnostic";
+        if (s.unit)     doc["unit_of_measurement"] = s.unit;
+        if (s.devClass) doc["device_class"]        = s.devClass;
+        if (s.devClass && String(s.devClass) != "duration") doc["state_class"] = "measurement";
+        if (s.icon)     doc["icon"]                = s.icon;
+
+        addDeviceBlock(doc);
+
+        String payload;
+        serializeJson(doc, payload);
+        mqtt.publish(topic.c_str(), payload.c_str(), true);
+    }
+}
+
+void publishTelemetry() {
+    if (!mqtt.connected()) return;
+    JsonDocument doc;
+    doc["rssi"]      = WiFi.RSSI();
+    doc["free_heap"] = ESP.getFreeHeap();
+    doc["heap_frag"] = ESP.getHeapFragmentation();
+    doc["max_block"] = ESP.getMaxFreeBlockSize();
+    doc["uptime"]    = millis() / 1000;
+    String payload;
+    serializeJson(doc, payload);
+    mqtt.publish(telemetryTopic().c_str(), payload.c_str(), true);
 }
 
 bool mqttConnect() {
@@ -155,6 +220,7 @@ bool mqttConnect() {
     if (ok) {
         mqtt.publish(lwt.c_str(), "online", true);
         publishDiscovery();
+        publishTelemetryDiscovery();
     }
     return ok;
 }
@@ -960,7 +1026,9 @@ void loop() {
                 if (mqttConnect()) {
                     Serial.println(F("MQTT connected"));
                     publishLevel(true);
+                    publishTelemetry();
                     lastRepublish = millis();
+                    lastTelemetry = millis();
                 } else {
                     Serial.printf("MQTT failed (state=%d)\n", mqtt.state());
                 }
@@ -971,6 +1039,11 @@ void loop() {
             bool force = (now - lastRepublish > REPUBLISH_MS);
             publishLevel(force);
             if (force) lastRepublish = now;
+
+            if (now - lastTelemetry > TELEMETRY_MS) {
+                lastTelemetry = now;
+                publishTelemetry();
+            }
         }
     }
 

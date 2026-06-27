@@ -15,6 +15,7 @@
 #define WIFI_REBOOT_MS    600000    // last resort: reboot after 10 min offline
 #define MQTT_RECONNECT_MS 5000
 #define REPUBLISH_MS      60000
+#define TELEMETRY_MS      30000     // how often to publish heap/wifi telemetry
 
 static const int DEFAULT_GPIO[MAX_SWITCHES] = { 4, 5, 12, 14 };
 
